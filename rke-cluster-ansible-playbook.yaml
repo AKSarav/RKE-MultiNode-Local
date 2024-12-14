@@ -1,0 +1,84 @@
+---
+- name: Set up RKE cluster with Multipass
+  hosts: localhost
+  tasks:
+    - name: Create control panel node in Multipass
+      shell: multipass launch -n controlpanel --cpus 2 --mem 2048M --disk 20G
+      register: controlpanel_launch
+      
+
+    - name: Create worker node1 in Multipass
+      shell: multipass launch -n worker1 --cpus 2 --mem 2048M --disk 20G
+      register: worker1_launch
+      
+
+    - name: Create worker node2 in Multipass
+      shell: multipass launch -n worker2 --cpus 2 --mem 2048M --disk 20G
+      register: worker2_launch
+      
+
+    - name: Install Docker on all nodes
+      shell: |
+        multipass exec {{ item }} -- sudo apt-get update
+        multipass exec {{ item }} -- sudo apt-get install -y docker.io
+      loop:
+        - controlpanel
+        - worker1
+        - worker2
+      
+
+    - name: Retrieve IP addresses of nodes
+      shell: multipass info {{ item }} | grep IPv4 | awk '{print $2}'
+      loop:
+        - controlpanel
+        - worker1
+        - worker2
+      register: node_ips
+      
+
+    - name: Create RKE cluster configuration file
+      vars:
+          node_ips: "{{ node_ips.results | map(attribute='stdout') | list }}"
+      template:
+        src: rke-cluster.j2
+        dest: rke-cluster.yml
+      delegate_to: localhost
+      
+
+    - name: Copy SSH key to nodes for RKE access
+      shell: |
+        echo "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}" | multipass exec {{ item }} -- sudo tee -a /home/ubuntu/.ssh/authorized_keys
+      loop:
+        - controlpanel
+        - worker1
+        - worker2
+
+    - name: Change ownership of Docker Sock to ubuntu on all nodes
+      shell: |
+        multipass exec {{ item }} -- sudo chown -R ubuntu:root /var/run/docker.sock
+      loop:
+        - controlpanel
+        - worker1
+        - worker2
+
+    - name: Enable communication between nodes
+      shell: |
+        multipass exec {{ item[0] }} -- sudo ufw allow from {{ item[1] }}
+      with_nested:
+        - ['controlpanel', 'worker1', 'worker2']
+        - "{{ node_ips.results | map(attribute='stdout') | list }}"
+
+    - name: remove the kubeconfig and cluster state file if present       
+      file:
+        path: "{{item}}"
+        state: absent
+      loop:
+        - kube_config_rke-cluster.yml
+        - rks-cluster.rkestate
+
+    - name: Deploy RKE cluster
+      shell: rke up --config rke-cluster.yml
+      
+    - name: Append the kubeconfig
+      shell: cat kube_config_rke-cluster.yml >> ~/.kube/config
+      

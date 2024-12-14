@@ -1,0 +1,22 @@
+nodes:
+    - address: {{ node_ips.results[0].stdout }}
+      user: ubuntu
+      role: 
+        - controlplane
+        - etcd
+      ssh_key_path: ~/.ssh/id_ed25519
+    - address: {{ node_ips.results[1].stdout }}
+      user: ubuntu
+      role: 
+        - worker
+      ssh_key_path: ~/.ssh/id_ed25519
+    - address: {{ node_ips.results[2].stdout }}
+      user: ubuntu
+      role: 
+        - worker
+      ssh_key_path: ~/.ssh/id_ed25519
+services:
+    etcd:
+      snapshot: true
+      creation: 6h
+      retention: 24h
